@@ -12,16 +12,21 @@ import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
+import org.springframework.core.env.Environment;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.oidc.OidcScopes;
@@ -41,6 +46,17 @@ import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
+
+    @Autowired
+    private Environment env;
+
+    @Autowired
+    private UserDetailsService userDetailsService;
+
+    @Bean
+    public static BCryptPasswordEncoder passwordEncoder(){
+        return new BCryptPasswordEncoder();
+    }
 
     @Bean
     @Order(1)
@@ -75,36 +91,43 @@ public class SecurityConfig {
                 )
                 // Form login handles the redirect to the login page from the
                 // authorization server filter chain
-                .formLogin(Customizer.withDefaults());
+                .formLogin(Customizer.withDefaults()).csrf(AbstractHttpConfigurer::disable);
 
         return http.build();
     }
 
-    @Bean
-    public UserDetailsService userDetailsService() {
-        UserDetails userDetails = User.withDefaultPasswordEncoder()
-                .username("admin")
-                .password("12345")
-                .roles("USER")
-                .build();
-
-        return new InMemoryUserDetailsManager(userDetails);
+    @Autowired
+    protected void configure(AuthenticationManagerBuilder auth) throws Exception{
+        auth.userDetailsService(userDetailsService).passwordEncoder(passwordEncoder());
     }
+//    @Bean
+//    public UserDetailsService userDetailsService() {
+//        UserDetails userDetails = User.withDefaultPasswordEncoder()
+//                .username("admin")
+//                .password("12345")
+//                .roles("USER")
+//                .build();
+//
+//        return new InMemoryUserDetailsManager(userDetails);
+//    }
 
     @Bean
     public RegisteredClientRepository registeredClientRepository() {
         RegisteredClient oidcClient = RegisteredClient.withId(UUID.randomUUID().toString())
-                .clientId("oidc-client")
-                .clientSecret("{noop}12345")
+                .clientId("usuarios-client")
+                //.clientSecret("{noop}12345")
+                .clientSecret(passwordEncoder().encode("12345"))
                 .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
                 .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
-                .redirectUri("http://127.0.0.1:8001/login/oauth2/code/oidc-client")
-                .redirectUri("http://127.0.0.1:8001/authorized")
-                .postLogoutRedirectUri("http://127.0.0.1:8001/")
+                .redirectUri(env.getProperty("LB_USUARIOS_URI") + "/login/oauth2/code/msvc-usuarios-client")
+                .redirectUri(env.getProperty("LB_USUARIOS_URI") + "/authorized")
+                .postLogoutRedirectUri(env.getProperty("LB_USUARIOS_URI"))
                 .scope(OidcScopes.OPENID)
                 .scope(OidcScopes.PROFILE)
-                .clientSettings(ClientSettings.builder().requireAuthorizationConsent(true).build())
+                .scope("read")
+                .scope("write")
+                .clientSettings(ClientSettings.builder().requireAuthorizationConsent(false).build())
                 .build();
 
         return new InMemoryRegisteredClientRepository(oidcClient);
